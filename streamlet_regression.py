@@ -4,34 +4,53 @@ import tensorflow as tf
 import pandas as pd
 import pickle
 
-# Load the trained Keras model
-model = tf.keras.models.load_model("salary_regression_model.h5", compile=False)
+# ==============================
+# Load Model & Encoders/Scalers
+# ==============================
+MODEL_PATH = "salary_regression_model.h5"
+ENCODERS_DIR = "."
 
-# Load encoders and scaler
-with open("gender_encoder.pkl", "rb") as f:
+model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+
+with open(f"{ENCODERS_DIR}/gender_encoder.pkl", "rb") as f:
     gender_encoder = pickle.load(f)
 
-with open("geo_encoder.pkl", "rb") as f: 
+with open(f"{ENCODERS_DIR}/geo_encoder.pkl", "rb") as f: 
     geo_encoder = pickle.load(f)
 
-with open("scaler_X.pkl", "rb") as f:
-    scaler = pickle.load(f)
+with open(f"{ENCODERS_DIR}/scaler_X.pkl", "rb") as f:
+    scaler_X = pickle.load(f)
 
-# Streamlit title
-st.title("Estimated Salary Prediction App")
+with open(f"{ENCODERS_DIR}/scaler_Y.pkl", "rb") as f:
+    scaler_Y = pickle.load(f)
 
-# User inputs
-geography = st.selectbox("Geography", geo_encoder.categories_[0])
-gender = st.selectbox("Gender", gender_encoder.classes_)
-age = st.slider("Age", 18, 92)
-balance = st.number_input("Balance")
-credit_score = st.number_input("Credit Score", min_value=300, max_value=850)
-exited = st.selectbox("Exited", [0, 1])
-tenure = st.slider("Tenure", 0, 10)
-num_of_products = st.slider("Number of Products", 1, 4)
-has_cr_card = st.selectbox("Has Credit Card", [0, 1])
-is_active_member = st.selectbox("Is Active Member", [0, 1])
+# ==============================
+# Streamlit App UI
+# ==============================
+st.set_page_config(page_title="Salary Prediction", page_icon="💰", layout="centered")
+st.title("💰 Estimated Salary Prediction App")
+st.markdown("Enter customer details to get an estimated salary prediction.")
 
+# Input fields
+col1, col2 = st.columns(2)
+
+with col1:
+    geography = st.selectbox("🌍 Geography", geo_encoder.categories_[0])
+    gender = st.selectbox("👤 Gender", gender_encoder.classes_)
+    age = st.slider("📅 Age", 18, 92, 30)
+    tenure = st.slider("📆 Tenure (Years)", 0, 10, 5)
+    num_of_products = st.slider("🛍 Number of Products", 1, 4, 1)
+
+with col2:
+    balance = st.number_input("🏦 Balance", min_value=0.0, value=0.0, step=1000.0, format="%.2f")
+    credit_score = st.number_input("💳 Credit Score", min_value=300, max_value=850, value=600, step=1)
+    has_cr_card = st.selectbox("💳 Has Credit Card", [0, 1])
+    is_active_member = st.selectbox("✅ Is Active Member", [0, 1])
+    exited = st.selectbox("🚪 Exited", [0, 1])
+
+# ==============================
+# Data Preprocessing
+# ==============================
 # Encode gender
 gender_encoded = gender_encoder.transform([gender])[0]
 
@@ -42,7 +61,7 @@ geo_encoded_df = pd.DataFrame(
     columns=geo_encoder.get_feature_names_out(["Geography"])
 )
 
-# Create the input DataFrame (with all features EXCEPT EstimatedSalary)
+# Combine into DataFrame
 input_data = pd.DataFrame({
     "CreditScore": [credit_score],
     "Gender": [gender_encoded],
@@ -52,22 +71,28 @@ input_data = pd.DataFrame({
     "NumOfProducts": [num_of_products],
     "HasCrCard": [has_cr_card],
     "IsActiveMember": [is_active_member],
-    "Exited": [exited]  # ✅ required input feature
+    "Exited": [exited]
 })
 
-# Add one-hot encoded geography
+# Merge with geography one-hot columns
 input_data = pd.concat([input_data.reset_index(drop=True), geo_encoded_df.reset_index(drop=True)], axis=1)
 
-# Match training column order
-input_data = input_data[scaler.feature_names_in_]
+# Ensure same feature order as training
+try:
+    input_data = input_data[scaler_X.feature_names_in_]
+except AttributeError:
+    st.error("Scaler does not contain feature names. Please check training code.")
+    st.stop()
 
-# Scale the input features
-scaled_input = scaler.transform(input_data)
+# Scale inputs
+scaled_input = scaler_X.transform(input_data)
 
-# Predict salary
-predicted_salary = model.predict(scaled_input)[0][0]
+# ==============================
+# Prediction
+# ==============================
+if st.button("🔮 Predict Salary"):
+    pred_scaled = model.predict(scaled_input)
+    pred_actual = scaler_Y.inverse_transform(pred_scaled)
+    salary_value = pred_actual[0][0]
 
-# Display result
-st.success(f"Predicted Estimated Salary: ₹{predicted_salary:,.2f}")
-
-
+    st.success(f"💵 Predicted Estimated Salary: ₹{salary_value:,.2f}")
